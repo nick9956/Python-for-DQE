@@ -1,7 +1,9 @@
+import csv
 from datetime import datetime
 from random import choice
 from os import path, remove
 from HW_4_3 import normalize_text
+from re import sub
 
 
 class News:
@@ -70,7 +72,7 @@ class FilePublisher:
     
             # if file size is 0, enter first record
             if (file_size == 0):
-                file.write("News feed:")
+                file.write("News feed:\n")
 
             text = input('Please enter your text: ')
 
@@ -105,6 +107,76 @@ class FilePublisher:
                 file.write(normalize_record)
 
 
+class FileProcessor:
+
+    def __init__(self, reader_path=None, publisher_path='news_feed.txt'):
+        self.reader = FileReader(reader_path)
+        self.publisher = FilePublisher(publisher_path)
+
+    def process_file(self):
+        records = self.reader.read_file()
+        self.reader.delete_read_file()
+        self.publisher.publish_records(records)
+
+
+class SCVGenerator:
+
+    def __init__(self, file_path: str = 'news_feed.txt'):
+        self.file_path = file_path
+
+    def get_text(self):
+        with open(self.file_path) as file:
+            text = file.read()
+        text = text.replace('\n', ' ').replace('\r', '')
+        text = sub(r'[^\w\s]|[\d]', ' ', text)  # Remove non-word characters and digits
+        text = sub(r'\s+', ' ', text)  # Replace multiple spaces with a single space
+        return text
+
+    def count_word(self):
+        text = self.get_text().lower()
+        words = text.split()
+        words_counter = {}
+        for word in words:
+            words_counter[word] = words_counter.get(word, 0) + 1
+        return words_counter
+    
+    def count_letter(self):
+        letters = list(self.get_text())
+        count_all_letters = len(letters)
+        count_letter = []
+        for letter in letters:
+            if letter == ' ':
+                continue
+            upper = 0
+            if letter.isupper():
+                letter = letter.lower()
+                upper = 1
+            for dictionary in count_letter:
+                if letter == dictionary.get('letter'):
+                    dictionary['count_all'] += 1
+                    dictionary['count_upper'] += upper
+                    dictionary['percentage'] = (dictionary['count_all'] / count_all_letters)*100
+                    break
+            else:
+                count_letter.append({'letter': letter, 'count_all': 1, 'count_upper': upper, 'percentage': (1/count_all_letters)*100})
+        return count_letter
+    
+    def create_count_words_csv(self):
+        count_words = self.count_word()
+        with open('count_words.csv', 'w', newline='') as csv_file:
+            writer = csv.writer(csv_file, delimiter='-')
+            for key, value in count_words.items():
+                writer.writerow([key, value])
+
+    def create_count_letters_csv(self):
+        count_letter = self.count_letter()
+        keys = count_letter[0].keys()
+        with open('count_letters.csv', 'w', newline='') as csv_file:
+            dict_writer = csv.DictWriter(csv_file, keys)
+            dict_writer.writeheader()
+            dict_writer.writerows(count_letter)
+
+
 while True:
     method = input('------------------------------------------\nHow do you want to add a data? Please choose from the variants below:\n1 - Manually, 2 - From File\nTo exit, type "exit"\n')
 
@@ -120,21 +192,19 @@ while True:
     elif method == '2':
         location = input('Do you want to use default path file location or enter new?\n1 - Default, 2 - New\n')
         if location == '1':
-            reader = FileReader()
-            records = reader.read_file()
-            reader.delete_read_file()
-            publisher = FilePublisher()
-            publisher.publish_records(records)
+            processor = FileProcessor()
+            processor.process_file()
         elif location == '2':
             new_location = input('Please enter new file location\n')
-            reader = FileReader(new_location)
-            records = reader.read_file()
-            reader.delete_read_file()
-            publisher = FilePublisher()
-            publisher.publish_records(records)
+            processor = FileProcessor(reader_path=new_location)
+            processor.process_file()
         else:
             print('Unknown option was selected. Please try again\n')
             continue
     else:
         print('Unknown option was selected. Please try again\n')
         continue
+
+    csv_files = SCVGenerator()
+    csv_files.create_count_words_csv()
+    csv_files.create_count_letters_csv()
