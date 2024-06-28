@@ -1,4 +1,5 @@
 import csv
+import xml.etree.ElementTree as ET
 from json import load
 from datetime import datetime
 from random import choice
@@ -53,7 +54,7 @@ class FileReader:
         records = []
         with open(self.file_path, 'r', encoding='utf8') as file:
             records = file.readlines()            
-        return records
+        return ['\n'] + records
 
     def delete_read_file(self):
         remove(self.file_path)
@@ -70,8 +71,60 @@ class JSONReader:
             data = load(file)      
         return data
 
-    def transform_to_text(self):
-        records = self.load_file()
+    def delete_read_file(self):
+        remove(self.file_path)
+
+
+class XMLReader:
+
+    def __init__(self, file_path: str = 'data.xml'):
+        self.file_path = file_path
+
+    def read_file(self):
+        root = ET.parse(self.file_path)
+        data = []
+        for item in root.findall('item'):
+            item_data = {}
+            item_data['method'] = item.find('method').text
+            item_data['text'] = item.find('text').text
+
+            # Check for other fields
+            city = item.find('city')
+            if city is not None:
+                item_data['city'] = city.text
+
+            current_date = item.find('current_date')
+            if current_date is not None:
+                item_data['current_date'] = current_date.text
+
+            actual_until = item.find('actual_until')
+            if actual_until is not None:
+                item_data['actual_until'] = actual_until.text
+
+            days_left = item.find('days_left')
+            if days_left is not None:
+                item_data['days_left'] = days_left.text
+
+            funny_mark = item.find('funny_mark')
+            if funny_mark is not None:
+                item_data['funny_mark'] = funny_mark.text
+
+            data.append(item_data)
+        return data
+
+    def delete_read_file(self):
+        remove(self.file_path)
+
+
+class FilePublisher:
+
+    def __init__(self, file_path: str = 'news_feed.txt'):
+        self.file_path = file_path
+
+    def check_file_size(self):
+        return path.getsize(self.file_path)
+
+    def transform_to_text(self, records):
         data = ''
         for record in records:           
             method = record['method']
@@ -86,18 +139,6 @@ class JSONReader:
             elif method == 'Joke of the day':
                 data += record['funny_mark'] + '\n'
         return data
-
-    def delete_read_file(self):
-        remove(self.file_path)
-
-
-class FilePublisher:
-
-    def __init__(self, file_path: str = 'news_feed.txt'):
-        self.file_path = file_path
-
-    def check_file_size(self):
-        return path.getsize(self.file_path)
 
     def publish_record(self, data_type):
         with open(self.file_path, 'a') as file:
@@ -159,8 +200,22 @@ class JSONProcessor:
         self.publisher = FilePublisher(publisher_path)
 
     def process_file(self):
-        records = self.reader.transform_to_text()
+        list_of_dicts = self.reader.load_file()
         self.reader.delete_read_file()
+        records = self.publisher.transform_to_text(list_of_dicts)
+        self.publisher.publish_records(records)
+
+
+class XMLProcessor:
+
+    def __init__(self, reader_path='data.xml', publisher_path='news_feed.txt'):
+        self.reader = XMLReader(reader_path)
+        self.publisher = FilePublisher(publisher_path)
+
+    def process_file(self):
+        list_of_dicts = self.reader.read_file()
+        self.reader.delete_read_file()
+        records = self.publisher.transform_to_text(list_of_dicts)
         self.publisher.publish_records(records)
 
 
@@ -184,7 +239,7 @@ class SCVGenerator:
         for word in words:
             words_counter[word] = words_counter.get(word, 0) + 1
         return words_counter
-    
+
     def count_letter(self):
         letters = list(self.get_text())
         count_all_letters = len(letters)
@@ -205,7 +260,7 @@ class SCVGenerator:
             else:
                 count_letter.append({'letter': letter, 'count_all': 1, 'count_upper': upper, 'percentage': (1/count_all_letters)*100})
         return count_letter
-    
+
     def create_count_words_csv(self):
         count_words = self.count_word()
         with open('count_words.csv', 'w', newline='') as csv_file:
@@ -223,7 +278,7 @@ class SCVGenerator:
 
 
 while True:
-    method = input('------------------------------------------\nHow do you want to add a data? Please choose from the variants below:\n1 - Manually, 2 - From Text File, 3 - From JSON File\nTo exit, type "exit"\n')
+    method = input('------------------------------------------\nHow do you want to add a data? Please choose from the variants below:\n1 - Manually, 2 - From Text File, 3 - From JSON File, 4 - From XML File\nTo exit, type "exit"\n')
 
     if method.lower() == 'exit':
         break
@@ -254,6 +309,18 @@ while True:
         elif location == '2':
             new_location = input('Please enter new file location\n')
             processor = JSONProcessor(reader_path=new_location)
+            processor.process_file()
+        else:
+            print('Unknown option was selected. Please try again\n')
+            continue
+    elif method == '4':
+        location = input('Do you want to use default path file location or enter new?\n1 - Default, 2 - New\n')
+        if location == '1':
+            processor = XMLProcessor()
+            processor.process_file()
+        elif location == '2':
+            new_location = input('Please enter new file location\n')
+            processor = XMLProcessor(reader_path=new_location)
             processor.process_file()
         else:
             print('Unknown option was selected. Please try again\n')
