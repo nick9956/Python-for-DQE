@@ -1,4 +1,5 @@
 import csv
+import sqlite3
 import xml.etree.ElementTree as ET
 from json import load
 from datetime import datetime
@@ -45,16 +46,100 @@ class JokeOfTheDay:
             text=self.text, funny_meter=funny_meter)
 
 
+class DBHandler:
+    def __init__(self, db_name='news_feed.db'):
+        self.conn = sqlite3.connect(db_name)
+        self.cursor = self.conn.cursor()
+
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS News(
+                id INTEGER PRIMARY KEY,
+                text TEXT NOT NULL,
+                city TEXT NOT NULL,
+                current_date TEXT NOT NULL);
+        ''')
+
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS PrivateAd(
+                id INTEGER PRIMARY KEY,
+                text TEXT NOT NULL,
+                actual_until TEXT NOT NULL,
+                days_left INTEGER NOT NULL);
+        ''')
+
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS JokeOfTheDay(
+                id INTEGER PRIMARY KEY,
+                text TEXT NOT NULL,
+                funny_mark TEXT NOT NULL);
+        ''')
+
+    def insert_news(self, news):
+        self.cursor.execute('''
+            SELECT * FROM News WHERE text = ? AND city = ? AND current_date = ?;
+        ''', (news['text'], news['city'], news['current_date']))
+
+        if self.cursor.fetchone() is None:
+            self.cursor.execute('''
+                INSERT INTO News (text, city, current_date) VALUES (?, ?, ?);
+            ''', (news['text'], news['city'], news['current_date']))
+            self.conn.commit()
+
+    def insert_private_ad(self, private_ad):
+        self.cursor.execute('''
+            SELECT * FROM PrivateAd WHERE text = ? AND actual_until = ? AND days_left = ?;
+        ''', (private_ad['text'], private_ad['actual_until'], private_ad['days_left']))
+
+        if self.cursor.fetchone() is None:
+            self.cursor.execute('''
+                INSERT INTO PrivateAd (text, actual_until, days_left) VALUES (?, ?, ?);
+            ''', (private_ad['text'], private_ad['actual_until'], private_ad['days_left']))
+            self.conn.commit()
+
+    def insert_joke_of_the_day(self, joke_of_the_day):
+        self.cursor.execute('''
+            SELECT * FROM JokeOfTheDay WHERE text = ? AND funny_mark = ?;
+        ''', (joke_of_the_day['text'], joke_of_the_day['funny_mark']))
+
+        if self.cursor.fetchone() is None:
+            self.cursor.execute('''
+                INSERT INTO JokeOfTheDay (text, funny_mark) VALUES (?, ?);
+            ''', (joke_of_the_day['text'], joke_of_the_day['funny_mark']))
+            self.conn.commit()
+
+    def close(self):
+        self.conn.close()
+
+
 class FileReader:
 
     def __init__(self, file_path: str = 'data.txt'):
         self.file_path = file_path
 
     def read_file(self):
-        records = []
-        with open(self.file_path, 'r', encoding='utf8') as file:
-            records = file.readlines()            
-        return ['\n'] + records
+    
+        data = []
+        with open('data.txt', 'r') as f:
+            lines = f.readlines()
+            i = 0
+            while i < len(lines):
+                if lines[i].strip().endswith('-------------------------'):
+                    method = lines[i].strip().split(' ')[0]
+                    text = lines[i+1].strip()
+                    additional_info = lines[i+2].strip()
+                    if method == 'News':
+                        city, current_date = additional_info.split(', ')
+                        data.append({'method': method, 'text': text, 'city': city, 'current_date': current_date})
+                    elif method == 'Private':
+                        actual_until, days_left = additional_info.replace('Actual until: ', '').split(', ')
+                        days_left = days_left.split(' ')[0]
+                        data.append({'method': method+' ad', 'text': text, 'actual_until': actual_until, 'days_left': days_left})
+                    elif method == 'Joke':
+                        data.append({'method': method+' of the day', 'text': text, 'funny_mark': additional_info})
+                    i += 3
+                else:
+                    i += 1
+        return data
 
     def delete_read_file(self):
         remove(self.file_path)
@@ -117,9 +202,9 @@ class XMLReader:
 
 
 class FilePublisher:
-
-    def __init__(self, file_path: str = 'news_feed.txt'):
+    def __init__(self, file_path='news_feed.txt'):
         self.file_path = file_path
+        self.db = DBHandler()
 
     def check_file_size(self):
         return path.getsize(self.file_path)
@@ -155,18 +240,21 @@ class FilePublisher:
                     city = input('Please enter the name of the city: ')
                     news = News(text, city)
                     file.write(news.get_news_body())
+                    self.db.insert_news({'method': 'News', 'text': text, 'city': city, 'current_date': datetime.now().strftime('%Y-%m-%d %H:%M')})
                 case '2':
                     while True:
                         try:
                             expiration_date = input('Please enter the expiration date (dd/mm/yyyy): ')
                             ad = PrivateAd(text, expiration_date)
                             file.write(ad.get_ad_body())
+                            self.db.insert_private_ad({'method': 'Private ad', 'text': text, 'actual_until': expiration_date, 'days_left': (datetime.strptime(expiration_date, '%d/%m/%Y').date() - datetime.now().date()).days})
                             break
                         except ValueError:
                             print("That's not a valid date. Please try again.")
                 case '3':
                     joke = JokeOfTheDay(text)
                     file.write(joke.get_joke_body())
+                    self.db.insert_joke_of_the_day({'method': 'Joke of the day', 'text': text, 'funny_mark': joke.generate_mark()})
 
     def publish_records(self, records):
         with open(self.file_path, 'a') as file:
@@ -180,17 +268,31 @@ class FilePublisher:
                 normalize_record = normalize_text(record)
                 file.write(normalize_record)
 
+    def __del__(self):
+        self.db.close()
+
 
 class FileProcessor:
-
     def __init__(self, reader_path='data.txt', publisher_path='news_feed.txt'):
         self.reader = FileReader(reader_path)
         self.publisher = FilePublisher(publisher_path)
+        self.db = DBHandler()
 
     def process_file(self):
-        records = self.reader.read_file()
+        list_of_dicts = self.reader.read_file()
         self.reader.delete_read_file()
+        records = self.publisher.transform_to_text(list_of_dicts)
         self.publisher.publish_records(records)
+
+        for record in list_of_dicts:
+            if record['method'] == 'News':
+                self.db.insert_news(record)
+            elif record['method'] == 'Private ad':
+                self.db.insert_private_ad(record)
+            elif record['method'] == 'Joke of the day':
+                self.db.insert_joke_of_the_day(record)
+
+        self.db.close()
 
 
 class JSONProcessor:
@@ -198,6 +300,7 @@ class JSONProcessor:
     def __init__(self, reader_path='data.json', publisher_path='news_feed.txt'):
         self.reader = JSONReader(reader_path)
         self.publisher = FilePublisher(publisher_path)
+        self.db = DBHandler()
 
     def process_file(self):
         list_of_dicts = self.reader.load_file()
@@ -205,18 +308,39 @@ class JSONProcessor:
         records = self.publisher.transform_to_text(list_of_dicts)
         self.publisher.publish_records(records)
 
+        for record in list_of_dicts:
+            if record['method'] == 'News':
+                self.db.insert_news(record)
+            elif record['method'] == 'Private ad':
+                self.db.insert_private_ad(record)
+            elif record['method'] == 'Joke of the day':
+                self.db.insert_joke_of_the_day(record)
+
+        self.db.close()
+
 
 class XMLProcessor:
 
     def __init__(self, reader_path='data.xml', publisher_path='news_feed.txt'):
         self.reader = XMLReader(reader_path)
         self.publisher = FilePublisher(publisher_path)
+        self.db = DBHandler()
 
     def process_file(self):
         list_of_dicts = self.reader.read_file()
         self.reader.delete_read_file()
         records = self.publisher.transform_to_text(list_of_dicts)
         self.publisher.publish_records(records)
+
+        for record in list_of_dicts:
+            if record['method'] == 'News':
+                self.db.insert_news(record)
+            elif record['method'] == 'Private ad':
+                self.db.insert_private_ad(record)
+            elif record['method'] == 'Joke of the day':
+                self.db.insert_joke_of_the_day(record)
+
+        self.db.close()
 
 
 class SCVGenerator:
